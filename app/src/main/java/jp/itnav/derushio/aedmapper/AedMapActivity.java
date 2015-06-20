@@ -1,5 +1,7 @@
 package jp.itnav.derushio.aedmapper;
 
+import android.content.Intent;
+import android.database.Cursor;
 import android.graphics.Color;
 import android.location.Location;
 import android.os.Bundle;
@@ -12,9 +14,13 @@ import com.google.android.gms.maps.GoogleMap;
 import com.google.android.gms.maps.SupportMapFragment;
 import com.google.android.gms.maps.model.CameraPosition;
 import com.google.android.gms.maps.model.LatLng;
+import com.google.android.gms.maps.model.Marker;
 import com.google.android.gms.maps.model.MarkerOptions;
 
+import java.util.ArrayList;
+
 import jp.itnav.derushio.aedmapper.adapter.CustomInfoAdapter;
+import jp.itnav.derushio.aedmapper.database.AedDatabaseManager;
 
 public class AedMapActivity extends AppCompatActivity {
 
@@ -23,10 +29,17 @@ public class AedMapActivity extends AppCompatActivity {
 
 	private CustomInfoAdapter mCustomInfoAdapter;
 
+	private AedDatabaseManager mAedDatabaseManager;
+
+	private ArrayList<IdHolder> mIdHolderList;
+
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
 		setContentView(R.layout.activity_aed_map);
+
+		mAedDatabaseManager = new AedDatabaseManager(this);
+		mIdHolderList = new ArrayList<>();
 
 		initializeToolbar();
 		setUpMapIfNeeded();
@@ -83,10 +96,24 @@ public class AedMapActivity extends AppCompatActivity {
 	 * <p/>
 	 * This should only be called once and when we are sure that {@link #mMap} is not null.
 	 */
+
 	private void setUpMap() {
 		mMap.setMyLocationEnabled(true);
 		mCustomInfoAdapter = new CustomInfoAdapter(this);
 		mMap.setInfoWindowAdapter(mCustomInfoAdapter);
+		mMap.setOnInfoWindowClickListener(new GoogleMap.OnInfoWindowClickListener() {
+			@Override
+			public void onInfoWindowClick(Marker marker) {
+				Intent intent = new Intent(AedMapActivity.this, AedViewActivity.class);
+				int markerId = convertMarkerId(marker.getId());
+				if (0 <= markerId && markerId < mIdHolderList.size()) {
+					intent.putExtra(AedViewActivity.ID, mIdHolderList.get(convertMarkerId(marker.getId())).getId());
+				}
+				intent.putExtra(AedViewActivity.LAT, marker.getPosition().latitude);
+				intent.putExtra(AedViewActivity.LNG, marker.getPosition().longitude);
+				startActivity(intent);
+			}
+		});
 
 		mMap.setOnMyLocationChangeListener(new GoogleMap.OnMyLocationChangeListener() {
 			@Override
@@ -102,11 +129,47 @@ public class AedMapActivity extends AppCompatActivity {
 		mMap.setOnMapLongClickListener(new GoogleMap.OnMapLongClickListener() {
 			@Override
 			public void onMapLongClick(LatLng latLng) {
-				MarkerOptions markerOptions = new MarkerOptions().draggable(true);
+				MarkerOptions markerOptions = new MarkerOptions();
+				markerOptions.draggable(true);
 				markerOptions.position(latLng);
 				markerOptions.title("新しいAED");
 				mMap.addMarker(markerOptions);
 			}
 		});
+
+		Cursor cursor = mAedDatabaseManager.getAllDataCursor(mAedDatabaseManager.getAedDatabaseHelper().itemId);
+		cursor.moveToFirst();
+		for (int i = 0; i < cursor.getCount(); i++) {
+			long id = cursor.getLong(mAedDatabaseManager.getAedDatabaseHelper().itemId.index);
+			String title = mAedDatabaseManager.findTitleById(id);
+			LatLng latLng = mAedDatabaseManager.findLatLngById(id);
+
+			if (latLng != null) {
+				MarkerOptions markerOptions = new MarkerOptions();
+				markerOptions.title(title);
+				markerOptions.position(latLng);
+				Marker marker = mMap.addMarker(markerOptions);
+				mIdHolderList.add(convertMarkerId(marker.getId()), new IdHolder(id));
+				cursor.moveToNext();
+			} else {
+				mAedDatabaseManager.deleteAedData(id);
+			}
+		}
+	}
+
+	private int convertMarkerId(String markerId) {
+		return Integer.parseInt(markerId.substring(1, markerId.length()));
+	}
+
+	public class IdHolder {
+		private long mId;
+
+		public IdHolder(long id) {
+			mId = id;
+		}
+
+		public long getId() {
+			return mId;
+		}
 	}
 }
